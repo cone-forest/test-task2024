@@ -1,10 +1,23 @@
-#include <execution>
 #include <format>
 #include <iostream>
 #include <memory>
 #include <numbers>
 #include <random>
 #include <vector>
+
+// parallel related headers
+#if defined(STD_PAR)
+#include <execution>
+#endif
+
+#if defined(OPENMP_PAR)
+#include <omp.h>
+#endif
+
+#if defined(TBB_PAR)
+#include <tbb/parallel_reduce.h>
+#include <tbb/tbb.h>
+#endif
 
 #include "curves/curves.h"
 
@@ -95,13 +108,58 @@ int main()
               return lhs->radius() < rhs->radius();
             });
 
-  auto sum =
-    std::transform_reduce(std::execution::par,
-                          randcircles.begin(),
-                          randcircles.end(),
-                          0.0,
-                          std::plus {},
-                          [](const auto &lhs) { return lhs->radius(); });
+#if defined(STD_PAR)
+  {
+    double sum =
+      std::transform_reduce(std::execution::par,
+                            randcircles.begin(),
+                            randcircles.end(),
+                            0.0,
+                            std::plus {},
+                            [](const auto &lhs) { return lhs->radius(); });
+    std::cout << std::format("sum of circle radii (STD): {}", sum) << std::endl;
+  }
+#endif
 
-  std::cout << std::format("sum of circle radii: {}", sum) << std::endl;
+#if defined(OPENMP_PAR)
+  {
+    double sum = 0.0;
+#pragma omp parallel for reduction(+ : sum)
+    for (int i = 0; i < randcircles.size(); i++) {
+      sum += randcircles[i]->radius();
+    }
+    std::cout << std::format("sum of circle radii (OpenMP): {}", sum)
+              << std::endl;
+  }
+#endif
+
+#if defined(TBB_PAR)
+  {
+    auto sum = tbb::parallel_reduce(
+      tbb::blocked_range<size_t>(0, randcircles.size()),
+      0.0,
+      [&](const tbb::blocked_range<size_t> &r, double accum) {
+        for (size_t i = r.begin(); i != r.end(); ++i) {
+          accum += randcircles[i]->radius();
+        }
+        return accum;
+      },
+      std::plus<double> {});
+    std::cout << std::format("sum of circle radii (TBB): {}", sum) << std::endl;
+  }
+#endif
+
+#if defined(STD_SEQ)
+  {
+    double sum =
+      std::transform_reduce(randcircles.begin(),
+                            randcircles.end(),
+                            0.0,
+                            std::plus {},
+                            [](const auto &lhs) { return lhs->radius(); });
+    std::cout << std::format("sum of circle radii (No parallelization): {}",
+                             sum)
+              << std::endl;
+  }
+#endif
 }
